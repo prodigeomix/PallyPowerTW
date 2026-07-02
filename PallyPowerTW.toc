@@ -10,7 +10,7 @@
 
 Locale\localization-enUS.lua
 Locale\localization-deDE.lua
-Locale\localization-esEs.lua
+Locale\localization-esES.lua
 
 PallyPowerManaCost.lua
 PallyPower.lua

@@ -1666,7 +1666,10 @@ function PallyPower_ScanSpells()
                     if ((name == bless) and (greaterBless)) then
                         local _, _, rank = string.find(spellRank, PallyPower_RankSearch)
                         if (RankInfo[id] and spellRank < RankInfo[id]["rank"]) then
-                        else
+                        elseif RankInfo[id] then
+                            -- Guard: RankInfo[id] is populated by the small-blessing scan earlier in
+                            -- this same loop. If the spellbook ever orders the Greater entry first,
+                            -- skip rather than index a nil table (the next scan pass will catch up).
                             RankInfo[id]["id"] = i
                             RankInfo[id]["name"] = name
                         end
@@ -1963,7 +1966,7 @@ function PallyPower_TacticaParseMessage(sender, msg)
                 PallyPower_Healers = {}
                 uiDirty = true
             end
-            if t == "S" and r == "T" and n ~= "" then
+            if t == "S" and r == "T" and n and n ~= "" then
                 PallyPower_Tanks[n] = true
                 if PallyPower_CheckRaidLeader(UnitName("player")) or UnitIsPartyLeader("player") then
                     local unitId = PallyPower_GetRaidIdByName(n)
@@ -1997,7 +2000,7 @@ function PallyPower_TacticaParseMessage(sender, msg)
                 end
                 uiDirty = true
             end
-            if t == "S" and r == "H" and n ~= "" then
+            if t == "S" and r == "H" and n and n ~= "" then
                 PallyPower_Healers[n] = true
                 -- Clear tank if was tank
                 if PallyPower_Tanks[n] then
@@ -2009,7 +2012,7 @@ function PallyPower_TacticaParseMessage(sender, msg)
                 end
                 uiDirty = true
             end
-            if t == "C" and n ~= "" then
+            if t == "C" and n and n ~= "" then
                 if PallyPower_Tanks[n] then
                     PallyPower_Tanks[n] = nil
                     if PallyPower_CheckRaidLeader(UnitName("player")) or UnitIsPartyLeader("player") then
@@ -2609,9 +2612,11 @@ function PallyPower_PerformCycleBackwards(name, class, skipempty)
         return
     end
 
-    if skipempty == false then
-        shift = IsShiftKeyDown()
-    end
+    -- Read the real-time key state unconditionally (matches the Aura/Seal cycle siblings). Previously
+    -- this only ran when skipempty == false, leaving global `shift` stuck at a stale value from an
+    -- earlier call on other paths (e.g. mouse-wheel cycling), which could silently trigger the
+    -- all-classes MASSIGN branch below even though Shift was not held for this call.
+    local shift = IsShiftKeyDown()
 
     --force pala (all buff possible) when shift wheeling
     if shift then
@@ -2695,9 +2700,9 @@ function PallyPower_PerformCycle(name, class, skipempty)
         return
     end
 
-    if skipempty == false then
-        shift = IsShiftKeyDown()
-    end    
+    -- Read the real-time key state unconditionally (matches the Aura/Seal cycle siblings). See
+    -- PallyPower_PerformCycleBackwards for why a conditional/global `shift` is unsafe here.
+    local shift = IsShiftKeyDown()
 
     --force pala (all buff possible) when shift wheeling
     if shift then
@@ -3100,6 +3105,55 @@ function PallyPower_GetBuffTextureID(text)
     return -2
 end
 
+-- Individual blessings pass. Finds the first member of the class who has an individual blessing
+-- assigned (by this paladin) and does not have that buff yet, casts it on them, and returns true.
+-- Returns false when nobody qualifies, so the caller falls through to the normal class blessing.
+--
+-- Runs BEFORE the class spell is put on the cursor, which avoids both 1.12 casting traps by design:
+-- no spell is pending yet so CastSpell() cannot toggle targeting off, and since the target lacks
+-- this blessing entirely, SpellCanTargetUnit() cannot reject it as a rank downgrade (a member who
+-- already has the class Greater Blessing can still receive a DIFFERENT individual blessing).
+function PallyPower_CastIndividualBlessing(classID)
+    local pname = UnitName("player")
+    if not CurrentBuffs[classID] then return false end
+    if not AllPallys[pname] then return false end
+    for unit, stats in CurrentBuffs[classID] do
+        local indID = GetNormalBlessings(pname, classID, stats.name)
+        if indID ~= -1 and AllPallys[pname][indID] and AllPallys[pname][indID]["idsmall"]
+            and not stats[indID]
+            -- anti double-cast: skip if we blessed this person less than 5 seconds ago
+            -- (gives the buff scan time to see the new buff before we consider them again)
+            and not (LastCastPlayer[stats.name] and LastCastPlayer[stats.name] > PALLYPOWER_NORMALBLESSINGDURATION - 5)
+            and (not UnitIsDeadOrGhost(unit)) and UnitIsVisible(unit) and PallyPower_CheckTargetLoS(unit)
+        then
+            local spellID = AllPallys[pname][indID]["idsmall"]
+            if GetSpellCooldown(spellID, BOOKTYPE_SPELL) < 1 then
+                CastSpell(spellID, BOOKTYPE_SPELL)
+                if SpellCanTargetUnit(unit) or UnitIsUnit(unit, "player") then
+                    SpellTargetUnit(unit)
+                    LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
+                    recentCastProtection = 2
+                    uiDirty = true
+                    PallyPower_ShowFeedback(
+                        format(
+                            PallyPower_Casting,
+                            PallyPower_BlessingID[indID],
+                            PallyPower_ClassID[classID],
+                            stats.name
+                        ), 0, 1, 0
+                    )
+                    TargetLastTarget()
+                    return true
+                else
+                    -- out of range / not targetable right now: drop the pending spell and try the next one
+                    SpellStopTargeting()
+                end
+            end
+        end
+    end
+    return false
+end
+
 function PallyPowerBuffButton_OnLoad(btn)
     this:SetBackdropColor(0, 0, 0, PP_PerUser.transparency)
 end
@@ -3152,6 +3206,12 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
     end
     if not AllPallys[UnitName("player")] or AllPallys[UnitName("player")][btn.buffID] == nil then return end
     PP_Debug("Casting " .. btn.buffID .. " on " .. btn.classID)
+
+    -- Individual blessings first (one per click); the class blessing logic below stays untouched
+    if mousebtn == "RightButton" and PallyPower_CastIndividualBlessing(btn.classID) then
+        return
+    end
+
     if (mousebtn == "RightButton") then
         if GetSpellCooldown(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL) < 1 then
             CastSpell(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL)
@@ -3235,19 +3295,6 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
             end
         end
 
-        -- Determine this unit's assigned blessing (individual if set, else class) WITHOUT casting yet.
-        -- Do NOT CastSpell here: re-casting the spell already pending from the initial CastSpell()
-        -- before the loop would TOGGLE targeting off (CastSpell on the pending spell cancels it),
-        -- making SpellCanTargetUnit fail for allies. We only need the ID now; the actual override
-        -- cast happens after the targeting check, and it is used for the LastCast bookkeeping.
-        local activeBlessID = btn.buffID
-        if mousebtn == "RightButton" then
-            local individualID = GetNormalBlessings(UnitName("player"), btn.classID, stats.name)
-            if individualID ~= -1 and individualID ~= btn.buffID and AllPallys[UnitName("player")][individualID] then
-                activeBlessID = individualID
-            end
-        end
-
         if
             (SpellCanTargetUnit(unit) or UnitIsUnit(unit, "player")) and
                 (not UnitIsDeadOrGhost(unit)) and PallyPower_CheckTargetLoS(unit) and
@@ -3256,36 +3303,22 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
         then
             PP_Debug("Trying to cast on " .. unit)
 
-            -- Targeting is validated: now switch the pending spell to the individual blessing if this
-            -- unit has one. It is a DIFFERENT spell than the pending class spell, so this switches the
-            -- cursor (does NOT toggle targeting off) and SpellTargetUnit then casts the individual.
-            if mousebtn == "RightButton" and activeBlessID ~= btn.buffID and AllPallys[UnitName("player")][activeBlessID] then
-                CastSpell(AllPallys[UnitName("player")][activeBlessID]["idsmall"], BOOKTYPE_SPELL)
-            end
-
             SpellTargetUnit(unit)
             recentCastProtection = 2
             uiDirty = true
 
             if (RegularBlessings == true) then
-                LastCast[activeBlessID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
+                LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
                 LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
             else
                 if (mousebtn == "LeftButton" and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
-                    LastCast[activeBlessID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
+                    LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
                 else
-                    if LastCast[activeBlessID .. btn.classID] == nil or LastCast[activeBlessID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
-                        LastCast[activeBlessID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
+                    if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
+                        LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
                     end
                 end
                 LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
-            end
-            -- When an individual blessing overrides the class spell, also mark the class key
-            -- so RecentCast activates on the next click and this unit gets skipped in LastCastOn
-            if activeBlessID ~= btn.buffID then
-                if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
-                    LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
-                end
             end
 
             if not skipclear and not RecentCast then
@@ -3319,7 +3352,7 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
             PallyPower_ShowFeedback(
                 format(
                     PallyPower_Casting,
-                    PallyPower_BlessingID[activeBlessID],
+                    PallyPower_BlessingID[btn.buffID],
                     PallyPower_ClassID[btn.classID],
                     UnitName(unit)
                 ), 0, 1, 0 -- Green color for feedback
@@ -3381,6 +3414,12 @@ function PallyPower_AutoBless(mousebutton)
         end
 
         PP_Debug("Casting " .. btn.buffID .. " on " .. btn.classID)
+
+        -- Individual blessings first (one per press); the class blessing logic below stays untouched
+        if mousebutton == "Hotkey1" and PallyPower_CastIndividualBlessing(btn.classID) then
+            return
+        end
+
         if (mousebutton == "Hotkey1") then
             if GetSpellCooldown(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL) < 1 then
                 CastSpell(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL)
@@ -3451,19 +3490,6 @@ function PallyPower_AutoBless(mousebutton)
                     end
                 end
 
-                -- Determine this unit's assigned blessing (individual if set, else class) WITHOUT casting yet.
-                -- Do NOT CastSpell here: re-casting the spell already pending from the initial CastSpell()
-                -- would TOGGLE targeting off, making SpellCanTargetUnit fail for allies. We only need the
-                -- ID now; the actual override cast happens after the targeting check, and it is used for
-                -- the LastCast bookkeeping.
-                local activeBlessID = btn.buffID
-                if mousebutton == "Hotkey1" then
-                    local individualID = GetNormalBlessings(UnitName("player"), btn.classID, stats.name)
-                    if individualID ~= -1 and individualID ~= btn.buffID and AllPallys[UnitName("player")][individualID] then
-                        activeBlessID = individualID
-                    end
-                end
-
                 if
                         (SpellCanTargetUnit(unit) or UnitIsUnit(unit, "player")) and
                             (not UnitIsDeadOrGhost(unit)) and PallyPower_CheckTargetLoS(unit) and
@@ -3472,35 +3498,22 @@ function PallyPower_AutoBless(mousebutton)
                 then
                     PP_Debug("Trying to cast on " .. unit)
 
-                    -- Targeting validated: switch the pending spell to the individual blessing if this unit
-                    -- has one (different spell, so it does NOT toggle targeting off), then cast.
-                    if mousebutton == "Hotkey1" and activeBlessID ~= btn.buffID and AllPallys[UnitName("player")][activeBlessID] then
-                        CastSpell(AllPallys[UnitName("player")][activeBlessID]["idsmall"], BOOKTYPE_SPELL)
-                    end
-
                     SpellTargetUnit(unit)
                     recentCastProtection = 2
                     uiDirty = true
 
                     if (RegularBlessings == true) then
-                        LastCast[activeBlessID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
+                        LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
                         LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
                     else
                         if (mousebutton == "Hotkey2" and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
-                            LastCast[activeBlessID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
+                            LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
                         else
-                            if LastCast[activeBlessID .. btn.classID] == nil or LastCast[activeBlessID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
-                                LastCast[activeBlessID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
+                            if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
+                                LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
                             end
                         end
                         LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
-                    end
-                    -- When an individual blessing overrides the class spell, also mark the class key
-                    -- so RecentCast activates on the next hotkey press and this unit gets skipped
-                    if activeBlessID ~= btn.buffID then
-                        if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
-                            LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
-                        end
                     end
                     if not skipclear and not RecentCast then
                         LastCastOn[btn.classID] = {}
@@ -3533,7 +3546,7 @@ function PallyPower_AutoBless(mousebutton)
                     PallyPower_ShowFeedback(
                         format(
                             PallyPower_Casting,
-                            PallyPower_BlessingID[activeBlessID],
+                            PallyPower_BlessingID[btn.buffID],
                             PallyPower_ClassID[btn.classID],
                             UnitName(unit)
                         ), 0, 1, 0 --Green feedback for casting
