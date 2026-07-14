@@ -36,6 +36,17 @@ scan de buffs voie le nouveau buff). Cas de test à valider en jeu :
 soi-même sans GB ✱ soi-même avec GB ✱ allié sans GB ✱ allié avec GB ✱ deux individuelles différentes
 sur deux membres (ex. GB Salut sur la classe + Might sur soi + Wisdom sur un allié → 2 clics).
 
+**Sémantique « remplace, pas cumule » (retour d'ilivans, l'auteur upstream, 14/07/2026) :**
+une assignation individuelle REMPLACE la béné de classe pour ce membre — elle ne s'y ajoute pas.
+Bug rapporté : classe + individuelle assignées sur soi, 2 clics droits → les DEUX bénés étaient
+posées (l'individuelle par la pré-passe, puis la classe par la boucle car la gate ne filtre pas sur
+`btn.need`). Fix : la boucle de classe (clic droit / Hotkey1 uniquement) **saute** tout membre ayant
+une individuelle castable (`skipIndividual` : `GetNormalBlessings ~= -1 et AllPallys[joueur][id]`
+non nil). Cohérent avec le `hasBuffs` de l'UI qui ne compte ces membres couverts que par leur
+individuelle — le bouton vert après la pose de l'individuelle est donc correct. Le clic gauche
+(Grande Béné) ne saute personne : la GB couvre toute la classe par nature. Si l'individuelle n'est
+pas castable (talent/rang manquant), le membre retombe sur la béné de classe (pas d'angle mort).
+
 ---
 
 ## 1. Vue d'ensemble

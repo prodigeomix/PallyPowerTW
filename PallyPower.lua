@@ -1484,7 +1484,13 @@ function PallyPower_UpdateUI()
                         if CurrentBuffs[btn.classID] then
                             for unit, stats in CurrentBuffs[btn.classID] do
                                 if LastCastPlayer[stats.name] then
-                                    LastCastPlayer[stats.name] = nil
+                                    -- Keep the timer of a member still covered by their individual
+                                    -- blessing (nhave_class ignores individuals, so this cleanup would
+                                    -- otherwise wipe their Time2 timer every UI refresh)
+                                    local ind = GetNormalBlessings(namePlayer, btn.classID, stats.name)
+                                    if ind == -1 or not stats[ind] then
+                                        LastCastPlayer[stats.name] = nil
+                                    end
                                 end
                            end
                         end
@@ -1515,11 +1521,12 @@ function PallyPower_UpdateUI()
                     if not (nneed > 0 or nhave > 0 or ndead > 0) then
                     else
                         BuffNum = BuffNum + 1
+                        -- Red only when nobody is covered by ANYTHING: neither the class blessing
+                        -- (nhave_class) nor an individual one (counted in nhave via hasBuffs). A member
+                        -- covered only by their individual blessing must not leave the button red.
                         if PP_PerUser.colorbuffbar then
                             -- New coloring scheme: Red when missing, Yellow when partially blessed, Transparent when fully blessed
-                            -- Use nhave_class for red check: don't go red if the class blessing is active,
-                            -- even when some members still need their individual assignment
-                            if (nhave_class == 0) then
+                            if (nhave == 0 and nhave_class == 0) then
                                 btn:SetBackdropColor(1, 0, 0, PP_PerUser.transparency)
                             elseif (nneed > 0 or ndead > 0) then
                                 btn:SetBackdropColor(1, 1, 0, PP_PerUser.transparency)
@@ -1528,7 +1535,7 @@ function PallyPower_UpdateUI()
                             end
                         else
                             -- Original coloring scheme
-                            if (nhave_class == 0) then
+                            if (nhave == 0 and nhave_class == 0) then
                                 btn:SetBackdropColor(1, 0, 0, PP_PerUser.transparency)
                             elseif (nneed > 0 or ndead > 0) then
                                 btn:SetBackdropColor(1, 1, 0.5, PP_PerUser.transparency)
@@ -3119,11 +3126,22 @@ function PallyPower_CastIndividualBlessing(classID)
     if not AllPallys[pname] then return false end
     for unit, stats in CurrentBuffs[classID] do
         local indID = GetNormalBlessings(pname, classID, stats.name)
+        -- Cast when the member lacks their individual blessing, or refresh it while still active:
+        -- like the class RecentCast rule, a refresh is allowed once the last cast is more than
+        -- BLESSINGTRESHOLD (60s) old; Shift bypasses that window. The 5s guard always applies so a
+        -- double-click can't double-cast before the buff scan sees the new buff.
+        local lastT = LastCastPlayer[stats.name]
+        local wants
+        if not stats[indID] then
+            wants = true
+        elseif IsShiftKeyDown() then
+            wants = true
+        else
+            wants = not (lastT and lastT > PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD)
+        end
         if indID ~= -1 and AllPallys[pname][indID] and AllPallys[pname][indID]["idsmall"]
-            and not stats[indID]
-            -- anti double-cast: skip if we blessed this person less than 5 seconds ago
-            -- (gives the buff scan time to see the new buff before we consider them again)
-            and not (LastCastPlayer[stats.name] and LastCastPlayer[stats.name] > PALLYPOWER_NORMALBLESSINGDURATION - 5)
+            and wants
+            and not (lastT and lastT > PALLYPOWER_NORMALBLESSINGDURATION - 5)
             and (not UnitIsDeadOrGhost(unit)) and UnitIsVisible(unit) and PallyPower_CheckTargetLoS(unit)
         then
             local spellID = AllPallys[pname][indID]["idsmall"]
@@ -3285,8 +3303,16 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
             end
         end
 
+        -- Members with a castable individual assignment are handled exclusively by the individual
+        -- pre-pass (PallyPower_CastIndividualBlessing): their individual blessing REPLACES the class
+        -- one, so the class small blessing must never also be cast on them. This matches the UI's
+        -- hasBuffs logic, which counts them as covered only by their individual blessing.
+        local skipIndividual = false
         if mousebtn == "RightButton" then
             local bltest = GetNormalBlessings(UnitName("player"),btn.classID, stats.name)
+            if bltest ~= -1 and AllPallys[UnitName("player")][bltest] then
+                skipIndividual = true
+            end
             if string.find(table.concat(btn.need, " "), stats.name) or
                (bltest ~= -1 and LastCastPlayer[stats.name] and ( LastCastPlayer[stats.name] < PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD ) ) then
                 RecentCast = false
@@ -3296,6 +3322,7 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
         end
 
         if
+            (not skipIndividual) and
             (SpellCanTargetUnit(unit) or UnitIsUnit(unit, "player")) and
                 (not UnitIsDeadOrGhost(unit)) and PallyPower_CheckTargetLoS(unit) and
                 not (RecentCast and string.find(table.concat(LastCastOn[btn.classID], " "), unit)) and
@@ -3480,8 +3507,14 @@ function PallyPower_AutoBless(mousebutton)
                     end
                 end
 
+                -- Members with a castable individual assignment are handled exclusively by the
+                -- individual pre-pass: their individual blessing REPLACES the class one (see OnClick).
+                local skipIndividual = false
                 if mousebutton == "Hotkey1" then
                     local bltest = GetNormalBlessings(UnitName("player"),btn.classID, stats.name)
+                    if bltest ~= -1 and AllPallys[UnitName("player")][bltest] then
+                        skipIndividual = true
+                    end
                     if string.find(table.concat(btn.need, " "), stats.name) or
                        (bltest ~= -1 and LastCastPlayer[stats.name] and ( LastCastPlayer[stats.name] < PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD ) ) then
                         RecentCast = false
@@ -3491,6 +3524,7 @@ function PallyPower_AutoBless(mousebutton)
                 end
 
                 if
+                        (not skipIndividual) and
                         (SpellCanTargetUnit(unit) or UnitIsUnit(unit, "player")) and
                             (not UnitIsDeadOrGhost(unit)) and PallyPower_CheckTargetLoS(unit) and
                             not (RecentCast and string.find(table.concat(LastCastOn[btn.classID], " "), unit)) and
