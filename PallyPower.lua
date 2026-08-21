@@ -925,38 +925,41 @@ function PallyPowerGrid_Update(tdiff)
 
                 for unit, stats in CurrentBuffs[ii - 1] do
 
-                    local pbnt = fname .. "PlayerButton" .. (currentPlayer + 1) -- Index is based on 1
+                    -- Guard: only PALLYPOWER_MAXPERCLASS (15) PlayerButton slots exist per class group
+                    -- in the XML. A class with more members than that (large raids) must not reference
+                    -- a button beyond the last slot - getglobal() on a nonexistent frame returns nil and
+                    -- indexing it crashes. Extra members past the 15th are simply not shown.
+                    if currentPlayer < PALLYPOWER_MAXPERCLASS then
+                        local pbnt = fname .. "PlayerButton" .. (currentPlayer + 1) -- Index is based on 1
 
-                    if unit then
-                        local shortname = stats.name
-                        if string.find(unit,"pet") then
-                            getglobal(pbnt .. "Text"):SetText(shortname) --"|T132242:0|t "..shortname
-                        else
-                            getglobal(pbnt .. "Text"):SetText(shortname)
-                        end
-                        local blessing = GetNormalBlessings(player,ii - 1, shortname) --class 0 == button 1
-                        if blessing ~= -1 then
-                            getglobal(pbnt .. "Icon"):SetTexture(BuffIconSmall[blessing])
+                        if unit then
+                            local shortname = stats.name
+                            if string.find(unit,"pet") then
+                                getglobal(pbnt .. "Text"):SetText(shortname) --"|T132242:0|t "..shortname
+                            else
+                                getglobal(pbnt .. "Text"):SetText(shortname)
+                            end
+                            local blessing = GetNormalBlessings(player,ii - 1, shortname) --class 0 == button 1
+                            if blessing ~= -1 then
+                                getglobal(pbnt .. "Icon"):SetTexture(BuffIconSmall[blessing])
+                            else
+                                getglobal(pbnt .. "Icon"):SetTexture("")
+                            end
+                            if PallyPower_Tanks[shortname] and PallyPower_Tanks[shortname] == true then
+                                getglobal(pbnt .. "Text"):SetTextColor(1, 0.65, 0)
+                            elseif PallyPower_Healers[shortname] and PallyPower_Healers[shortname] == true then
+                                getglobal(pbnt .. "Text"):SetTextColor(0, 1, 0)
+                            else
+                                getglobal(pbnt .. "Text"):SetTextColor(1, 1, 1)
+                            end
+                            getglobal(pbnt):SetFrameStrata("DIALOG")
+                            getglobal(pbnt):SetAlpha(1)
+                            currentPlayer = currentPlayer + 1
                         else
                             getglobal(pbnt .. "Icon"):SetTexture("")
+                            getglobal(pbnt):SetFrameStrata("BACKGROUND")
+                            getglobal(pbnt):SetAlpha(0)
                         end
-                        if PallyPower_Tanks[shortname] and PallyPower_Tanks[shortname] == true then
-                            getglobal(pbnt .. "Text"):SetTextColor(1, 0.65, 0)
-                        elseif PallyPower_Healers[shortname] and PallyPower_Healers[shortname] == true then
-                            getglobal(pbnt .. "Text"):SetTextColor(0, 1, 0)
-                        else
-                            getglobal(pbnt .. "Text"):SetTextColor(1, 1, 1)
-                        end
-                        getglobal(pbnt):SetFrameStrata("DIALOG")
-                        getglobal(pbnt):SetAlpha(1)        
-                        currentPlayer = currentPlayer + 1
-                        if currentPlayer > PALLYPOWER_MAXPERCLASS then
-                            currentPlayer = PALLYPOWER_MAXPERCLASS
-                        end
-                    else
-                        getglobal(pbnt .. "Icon"):SetTexture("")
-                        getglobal(pbnt):SetFrameStrata("BACKGROUND")
-                        getglobal(pbnt):SetAlpha(0)
                     end
 
                 end
