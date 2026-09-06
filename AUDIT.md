@@ -2,7 +2,7 @@
 
 > Document de travail (le « prompt ») pour guider les corrections et améliorations de l'addon.
 > Cible : WoW 1.12 / Turtle WoW. Fichier principal : `PallyPower.lua` (~3750 lignes).
-> Version TOC : 1.40 — Auteur d'origine : ivanovlk.
+> Version TOC : 1.41 — Auteur d'origine : ivanovlk.
 
 ---
 
