@@ -101,7 +101,7 @@ et cast en un clic (Grande Bénédiction 30 min = clic gauche, bénédiction 10 
    Grande Béné avant la petite pour une classe donnée, `nil` indexé → crash. **Corrigé** (garde
    `elseif RankInfo[id] then`, dégradation gracieuse au lieu du crash).
 
-### 🟠 Moyens — CORRIGÉ
+### 🟠 Moyens — CORRIGÉS
 7. **`shift` global instable dans `PallyPower_PerformCycle`/`PerformCycleBackwards`**
    (`PallyPower.lua:~2612, ~2700`) : contrairement à leurs 4 fonctions sœurs (Aura/Seal, qui font
    `local shift = IsShiftKeyDown()` sans condition), les cycles de bénédiction ne lisaient l'état de
@@ -111,25 +111,37 @@ et cast en un clic (Grande Bénédiction 30 min = clic gauche, bénédiction 10 
    la branche `MASSIGN` — écrasant **toutes** les 10 assignations de classe du joueur ciblé alors que
    personne n'appuyait sur Shift. **Corrigé** : `local shift = IsShiftKeyDown()` inconditionnel,
    aligné sur le pattern des 4 autres fonctions.
+8. **Blocage de cycle au simple-clic (`PerformCycle` bloqué à -1)** : Si `NeedsBuff` renvoie false pour
+   tous les sorts restants (doublons sur un autre paladin ou restriction de classe), la boucle ne trouvait
+   aucun sort et retombait en boucle sur -1, forçant le joueur à Shift-clic. **Corrigé** : passe 2 de
+   repli sur n'importe quel sort castable (`PallyPower_CanBuff`), garantissant qu'un simple clic cycle
+   toujours sans se bloquer.
+9. **`PallyPower_HasEnoughMana` & vérification Symbol of Kings avant cast** : Branchement complet de
+   la table de mana et vérification de `PP_Symbols < 1` en tête de `PallyPowerBuffButton_OnClick` et
+   `PallyPower_AutoBless`. Son d'échec `igQuestFailed` et retour visuel explicite au lieu d'un échec
+   silencieux ou d'un message trompeur "Couldn't find target". **Corrigé.**
+10. **Détection paladin quittant le groupe** : `PallyPower_PaladinLeftGroup` n'itérait que
+    `PallyPower_Assignments`. Si un paladin sans assignation partait, le départ était ignoré.
+    **Corrigé** : scan de `AllPallys` en plus de `PallyPower_Assignments`.
+11. **Smart Rebuff & Mode Compact** : Ajout du rebuff individuel automatique au clic gauche si
+    un seul membre manque de buff (économise Symboles des Rois et mana) et option `/pp compact`
+    masquant les classes 100% buffées.
 
 ### 🟡 Mineurs / qualité — restants (non corrigés, faible priorité)
-8. `PallyPower_HasEnoughMana` (`PallyPowerManaCost.lua:33`) est **complètement mort** : défini, jamais
-   appelé. Toute la table de coûts mana n'est branchée nulle part. Soit brancher (vérifier le mana
-   avant cast / griser le bouton), soit documenter que c'est une fonctionnalité abandonnée.
-9. `PP_NextScan = 0` (`MinimapButton.lua:132`) : assigné, jamais lu ailleurs. Reliquat d'un ancien
-   mécanisme de throttle remplacé par `uiDirty`/`uiDebounce`. Sans danger, juste mort.
-10. `print` redéfini globalement (`PallyPower.lua:108`) avec un commentaire expliquant que c'est pour
+12. `PP_NextScan = 0` (`MinimapButton.lua:132`) : assigné, jamais lu ailleurs. Reliquat d'un ancien
+    mécanisme de throttle remplacé par `uiDirty`/`uiDebounce`. Sans danger, juste mort.
+13. `print` redéfini globalement (`PallyPower.lua:108`) avec un commentaire expliquant que c'est pour
     compenser un bug de l'addon "Shagu Tweaks" avec les booléens. Intentionnel, mais c'est un override
     du client entier (affecte tous les autres addons qui appellent `print()`), pas juste PallyPowerTW.
-11. `PallyPower_SwapSet` (`MinimapButton.lua:117-136`) : les écritures Aura/Seal/CurrentSet sont à
+14. `PallyPower_SwapSet` (`MinimapButton.lua:117-136`) : les écritures Aura/Seal/CurrentSet sont à
     l'intérieur de la boucle `for id = 0, 9` alors qu'elles ne dépendent pas de `id` → 10 écritures
     redondantes de la même valeur. Sans impact fonctionnel, juste inefficace.
-12. Variables globales involontaires dispersées dans le fichier (`txt`, `cur`, `shift` — ce dernier
+15. Variables globales involontaires dispersées dans le fichier (`txt`, `cur`, `shift` — ce dernier
     corrigé au §2.7) faute de `local`. Style hérité de l'addon d'origine, cohérent dans son incohérence
     (présent dans beaucoup de fonctions). Pas de risque de crash identifié pour les occurrences
     restantes (`txt`/`cur` sont toujours réassignés avant lecture dans la même passe), donc laissé tel
     quel — un nettoyage global serait un gros diff pour un gain nul en stabilité.
-13. `.toc` référençait `Locale\localization-esEs.lua` (casse différente du fichier réel
+16. `.toc` référençait `Locale\localization-esEs.lua` (casse différente du fichier réel
     `localization-esES.lua`). Fonctionne sur Windows (NTFS insensible à la casse) mais casserait le
     chargement de la traduction espagnole sur un système sensible à la casse. **Corrigé.**
 

@@ -118,6 +118,10 @@ PALLYPOWER_OPTIONS_USE_UNITXP_SP3_LOS = "Use UnitXP_SP3.dll for Line of Sight ch
 PALLYPOWER_OPTIONS_USE_HDICONS = "Use HD Icons";
 PALLYPOWER_OPTIONS_TRANSPARENCY = "Global Transparency";
 PALLYPOWER_OPTIONS_COLOR_BUFFBAR = "Color BuffBar (Red=Missing, Yellow=Partial, Transparent=Complete)";
+PALLYPOWER_OPTIONS_HIDE_FULLY_BUFFED = "Hide fully buffed classes (Compact mode)";
+PALLYPOWER_OPTIONS_SMART_REBUFF = "Smart rebuff single missing player (saves reagents)";
+PALLYPOWER_MISSING_SYMBOLS = "Missing reagent: Symbol of Kings!";
+PALLYPOWER_NOT_ENOUGH_MANA = "Not enough mana!";
 
 PALLYPOWER_TEXT_DROPDOWN_SAVENEW = "Save New Set";
 PALLYPOWER_TEXT_DROPDOWN_SAVECURRENT = "Save Current Set";

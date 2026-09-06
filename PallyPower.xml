@@ -2029,7 +2029,7 @@
 	</Frame>
 	<Frame name="PallyPower_OptionsFrame" hidden="true" parent="UIParent" toplevel="true" movable="true" enableMouse="true" frameStrata="DIALOG"> 
 		<Size>
-			<AbsDimension x="400" y="450" />
+			<AbsDimension x="400" y="500" />
 		</Size>
 		<Anchors>
 			<Anchor point="CENTER" relativeTo="UIParent" relativePoint="CENTER"> 
@@ -2263,6 +2263,30 @@
 						<Anchor point="TOPLEFT">
 							<Offset>
 								<AbsDimension x="7" y="-425" />
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+				<FontString name="$parentOption17" inherits="GameFontHighlight" text="PALLYPOWER_OPTIONS_HIDE_FULLY_BUFFED" justifyH="LEFT">
+					<Size>
+						<AbsDimension x="300" y="16" />
+					</Size>
+					<Anchors>
+						<Anchor point="TOPLEFT">
+							<Offset>
+								<AbsDimension x="7" y="-450" />
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+				<FontString name="$parentOption18" inherits="GameFontHighlight" text="PALLYPOWER_OPTIONS_SMART_REBUFF" justifyH="LEFT">
+					<Size>
+						<AbsDimension x="300" y="16" />
+					</Size>
+					<Anchors>
+						<Anchor point="TOPLEFT">
+							<Offset>
+								<AbsDimension x="7" y="-475" />
 							</Offset>
 						</Anchor>
 					</Anchors>
@@ -2720,6 +2744,46 @@
 					</OnShow>
 					<OnClick>
 						PP_PerUser.colorbuffbar = this:GetChecked(); PallyPower_ColorBuffBarOption();
+					</OnClick>
+				</Scripts>
+			</CheckButton>			
+			<CheckButton name="HideFullyBuffedOptionChk" inherits="OptionsCheckButtonTemplate">
+				<Size>
+					<AbsDimension x="20" y="20" />
+				</Size>
+				<Anchors>
+					<Anchor point="TOPRIGHT">
+						<Offset>
+							<AbsDimension x="-5" y="-450" />
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnShow>
+						if (PP_PerUser.hidefullybuffed) then this:SetChecked(true) else this:SetChecked(false) end
+					</OnShow>
+					<OnClick>
+						PP_PerUser.hidefullybuffed = this:GetChecked(); PallyPower_HideFullyBuffedOption();
+					</OnClick>
+				</Scripts>
+			</CheckButton>			
+			<CheckButton name="SmartRebuffOptionChk" inherits="OptionsCheckButtonTemplate">
+				<Size>
+					<AbsDimension x="20" y="20" />
+				</Size>
+				<Anchors>
+					<Anchor point="TOPRIGHT">
+						<Offset>
+							<AbsDimension x="-5" y="-475" />
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnShow>
+						if (PP_PerUser.smartrebuff) then this:SetChecked(true) else this:SetChecked(false) end
+					</OnShow>
+					<OnClick>
+						PP_PerUser.smartrebuff = this:GetChecked(); PallyPower_SmartRebuffOption();
 					</OnClick>
 				</Scripts>
 			</CheckButton>			

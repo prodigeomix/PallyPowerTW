@@ -118,6 +118,10 @@ if ( GetLocale() == "deDE" ) then
     PALLYPOWER_OPTIONS_USE_HDICONS = "HD-Symbole verwenden";
     PALLYPOWER_OPTIONS_TRANSPARENCY = "Globale Transparenz";
     PALLYPOWER_OPTIONS_COLOR_BUFFBAR = "Färbe BuffBar (Rot=Fehlt, Gelb=Teilweise, Transparent=Vollständig)";
+    PALLYPOWER_OPTIONS_HIDE_FULLY_BUFFED = "Voll gebuffte Klassen ausblenden (Kompaktmodus)";
+    PALLYPOWER_OPTIONS_SMART_REBUFF = "Einzelnes fehlendes Ziel mit kleinem Segen nachbuffen";
+    PALLYPOWER_MISSING_SYMBOLS = "Fehlendes Reagenz: Symbol der Könige!";
+    PALLYPOWER_NOT_ENOUGH_MANA = "Nicht genug Mana!";
 
     PALLYPOWER_TEXT_DROPDOWN_SAVENEW = "Neues Set speichern";
     PALLYPOWER_TEXT_DROPDOWN_SAVECURRENT = "Aktuelles Set speichern";

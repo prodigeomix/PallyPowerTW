@@ -118,6 +118,10 @@ if ( GetLocale() == "esES" ) then
     PALLYPOWER_OPTIONS_USE_HDICONS = "Usar iconos HD";
     PALLYPOWER_OPTIONS_TRANSPARENCY = "Transparencia global";
     PALLYPOWER_OPTIONS_COLOR_BUFFBAR = "Colorear BuffBar (Rojo=Falta, Amarillo=Parcial, Transparente=Completo)";
+    PALLYPOWER_OPTIONS_HIDE_FULLY_BUFFED = "Ocultar clases con bendiciones completas (Modo compacto)";
+    PALLYPOWER_OPTIONS_SMART_REBUFF = "Rebuff inteligente a objetivo individual (ahorra componentes)";
+    PALLYPOWER_MISSING_SYMBOLS = "¡Falta componente: Símbolo de reyes!";
+    PALLYPOWER_NOT_ENOUGH_MANA = "¡Maná insuficiente!";
 
     PALLYPOWER_TEXT_DROPDOWN_SAVENEW = "Guardar nuevo conjunto";
     PALLYPOWER_TEXT_DROPDOWN_SAVECURRENT = "Guardar conjunto actual";

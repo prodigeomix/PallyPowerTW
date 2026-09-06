@@ -58,7 +58,9 @@ PP_PerUser = {
     hideblizzaura = false,
     useunitxp_sp3 = false,
     usehdicons = false,
-    transparency = 0.5
+    transparency = 0.5,
+    hidefullybuffed = false,
+    smartrebuff = true
 }
 PP_UnitXPDllLoaded = false
 
@@ -218,6 +220,24 @@ function PallyPower_ColorBuffBarOption()
     end
 end
 
+function PallyPower_HideFullyBuffedOption()
+    if (HideFullyBuffedOptionChk:GetChecked() == 1) then
+        PP_PerUser.hidefullybuffed = true
+    else
+        PP_PerUser.hidefullybuffed = false
+    end
+    uiDirty = true
+end
+
+function PallyPower_SmartRebuffOption()
+    if (SmartRebuffOptionChk:GetChecked() == 1) then
+        PP_PerUser.smartrebuff = true
+    else
+        PP_PerUser.smartrebuff = false
+    end
+end
+
+
 local function table_wipe(t)
     for k in pairs(t) do t[k] = nil end
 end
@@ -268,6 +288,8 @@ function PallyPower_InitConfig()
     if PP_PerUser.usehdicons == nil then PP_PerUser.usehdicons = false end
     if PP_PerUser.transparency == nil then PP_PerUser.transparency = 0.5 end
     if PP_PerUser.colorbuffbar == nil then PP_PerUser.colorbuffbar = false end
+    if PP_PerUser.hidefullybuffed == nil then PP_PerUser.hidefullybuffed = false end
+    if PP_PerUser.smartrebuff == nil then PP_PerUser.smartrebuff = true end
     if (pcall(UnitXP, "nop", "nop") == true) then
        PP_UnitXPDllLoaded = true;
     else
@@ -671,6 +693,16 @@ function PallyPower_SlashCommandHandler(msg)
         end
         return true
     end
+    if (msg == "compact") then
+        PP_PerUser.hidefullybuffed = not PP_PerUser.hidefullybuffed
+        uiDirty = true
+        if PP_PerUser.hidefullybuffed then
+            PallyPower_ShowFeedback("Compact mode enabled (fully buffed classes hidden)", 0, 1, 0)
+        else
+            PallyPower_ShowFeedback("Compact mode disabled", 1, 1, 0)
+        end
+        return true
+    end
     if PallyPowerFrame:IsVisible() then
         PallyPowerFrame:Hide()
     else
@@ -828,7 +860,7 @@ function PallyPowerGrid_Update(tdiff)
                     getglobal("PallyPowerFramePlayer" .. i .. "Skill" .. id):Show()
                     txt = skills[id]["rank"]
                     if ((tonumber(skills[id]["talent"]) or 0) > 0) then
-                        txt = txt .. "+" .. skills[id]["talent"]
+                        txt = txt .. " (+" .. skills[id]["talent"] .. ")"
                     end
                     getglobal("PallyPowerFramePlayer" .. i .. "Skill" .. id):SetText(txt)
                 else
@@ -842,7 +874,7 @@ function PallyPowerGrid_Update(tdiff)
                     getglobal("PallyPowerFramePlayer" .. i .. "Skill" .. id):Show()
                     txt = AllPallysAuras[name][id-6].rank
                     if ((tonumber(AllPallysAuras[name][id-6].talent) or 0) > 0) then
-                        txt = txt .. "+" .. AllPallysAuras[name][id-6].talent
+                        txt = txt .. " (+" .. AllPallysAuras[name][id-6].talent .. ")"
                     end
                     getglobal("PallyPowerFramePlayer" .. i .. "Skill" .. id):SetText(txt)
                 else
@@ -1521,7 +1553,8 @@ function PallyPower_UpdateUI()
                     getglobal("PallyPowerBuffBarBuff" .. BuffNum .. "Time"):SetText(
                         PallyPower_FormatTime(LastCast[assign[class] .. class])
                     )
-                    if not (nneed > 0 or nhave > 0 or ndead > 0) then
+                    local isFullyBuffed = (nneed == 0 and ndead == 0 and nhave > 0)
+                    if not (nneed > 0 or nhave > 0 or ndead > 0) or (PP_PerUser.hidefullybuffed and isFullyBuffed) then
                     else
                         BuffNum = BuffNum + 1
                         -- Red only when nobody is covered by ANYTHING: neither the class blessing
@@ -2637,35 +2670,55 @@ function PallyPower_PerformCycleBackwards(name, class, skipempty)
         cur = 6
     else
         cur = PallyPower_Assignments[name][class]
-        if skipempty == false then
-            if cur == -1 then
-                cur = 6
-            end
-        else
-            if cur == 0 then
-                cur = 6
-            end
+        if cur == -1 then
+            cur = 6
         end
     end
 
-    local stoploop = -1
-
     if skipempty == false then
         PallyPower_Assignments[name][class] = -1
-        stoploop = -1
     else
         PallyPower_Assignments[name][class] = 0
-        stoploop = 0
     end
 
-    for test = cur - 1, stoploop, -1 do
-        cur = test
+    local found = false
+    local next_cur = cur
+
+    -- Pass 1: Try to find previous needed buff
+    for test = cur - 1, 0, -1 do
         if PallyPower_CanBuff(name, test) and (PallyPower_NeedsBuff(class, test) or shift) then
-            do
+            next_cur = test
+            found = true
+            break
+        end
+    end
+
+    -- Pass 2: Fallback to any buff the paladin can cast so cycling never gets stuck
+    if not found and not shift then
+        for test = cur - 1, 0, -1 do
+            if PallyPower_CanBuff(name, test) then
+                next_cur = test
+                found = true
                 break
             end
         end
     end
+
+    if not found then
+        if skipempty == false then
+            next_cur = -1
+        else
+            next_cur = 0
+            for test = 5, 0, -1 do
+                if PallyPower_CanBuff(name, test) then
+                    next_cur = test
+                    break
+                end
+            end
+        end
+    end
+
+    cur = next_cur
 
     if shift then
         for test = 0, 9 do
@@ -2733,22 +2786,44 @@ function PallyPower_PerformCycle(name, class, skipempty)
     else
         PallyPower_Assignments[name][class] = 0
     end
-    for test = cur + 1, 6 do
+    local found = false
+    local next_cur = cur
+
+    -- Pass 1: Try to find next needed buff
+    for test = cur + 1, 5 do
         if PallyPower_CanBuff(name, test) and (PallyPower_NeedsBuff(class, test) or shift) then
-            cur = test
-            do
+            next_cur = test
+            found = true
+            break
+        end
+    end
+
+    -- Pass 2: Fallback to any buff the paladin can cast so cycling never gets stuck
+    if not found and not shift then
+        for test = cur + 1, 5 do
+            if PallyPower_CanBuff(name, test) then
+                next_cur = test
+                found = true
                 break
             end
         end
     end
 
-    if (cur == 6) then
+    if not found then
         if skipempty == false then
-            cur = -1
+            next_cur = -1
         else
-            cur = 0
+            next_cur = 0
+            for test = 0, 5 do
+                if PallyPower_CanBuff(name, test) then
+                    next_cur = test
+                    break
+                end
+            end
         end
     end
+
+    cur = next_cur
 
     if shift then
         for test = 0, 9 do
@@ -2960,6 +3035,12 @@ function PallyPower_PaladinLeftGroup()
             return true -- a paladin left the group
         end
     end
+    for name, _ in pairs(AllPallys) do
+        if AllPallysScanned[name] == nil then
+            return true -- a paladin left the group
+        end
+    end
+    return false
 end
 
 -- === Event-driven helper functions ===
@@ -3210,6 +3291,34 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
 
     local rankInfo = PallyPower_ScanSpells()
 
+    if not AllPallys[UnitName("player")] then
+        PallyPower_ScanSpells()
+    end
+    if not AllPallys[UnitName("player")] or AllPallys[UnitName("player")][btn.buffID] == nil then return end
+
+    -- Smart single-target rebuff: if only 1 member needs buff and others already have it, downgrade LeftButton to small blessing
+    local useSmall = (mousebtn == "RightButton")
+    if (mousebtn == "LeftButton" and PP_PerUser.smartrebuff and btn.need and table.getn(btn.need) == 1 and btn.have and table.getn(btn.have) > 0) then
+        useSmall = true
+    end
+
+    local isGreater = (not useSmall and not (AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"]) and RegularBlessings == false)
+
+    -- Pre-cast Reagent Check for Greater Blessings
+    if isGreater and PP_Symbols < 1 then
+        PlaySound("igQuestFailed")
+        PallyPower_ShowFeedback(PALLYPOWER_MISSING_SYMBOLS, 1, 0, 0)
+        return
+    end
+
+    -- Pre-cast Mana Check
+    local blessType = (isGreater and PALLYPOWER_GREATERBLESSING) or PALLYPOWER_SMALLBLESSING
+    if not PallyPower_HasEnoughMana(btn.buffID, blessType) then
+        PlaySound("igQuestFailed")
+        PallyPower_ShowFeedback(PALLYPOWER_NOT_ENOUGH_MANA, 1, 0, 0)
+        return
+    end
+
     RestorSelfAutoCastTimeOut = 1
     if (GetCVar("autoSelfCast") == "1") then
         RestorSelfAutoCast = true
@@ -3222,10 +3331,6 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
     local castspellid = -1
     local castspelloverride = -1    
 
-    if not AllPallys[UnitName("player")] then
-        PallyPower_ScanSpells()
-    end
-    if not AllPallys[UnitName("player")] or AllPallys[UnitName("player")][btn.buffID] == nil then return end
     PP_Debug("Casting " .. btn.buffID .. " on " .. btn.classID)
 
     -- Individual blessings first (one per click); the class blessing logic below stays untouched
@@ -3233,14 +3338,14 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
         return
     end
 
-    if (mousebtn == "RightButton") then
+    if useSmall then
         if GetSpellCooldown(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL) < 1 then
             CastSpell(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL)
             castspellid = btn.buffID
         else
             return
         end
-    elseif (mousebtn == "LeftButton") then
+    else
         if GetSpellCooldown(AllPallys[UnitName("player")][btn.buffID]["id"], BOOKTYPE_SPELL) < 1 then
             CastSpell(AllPallys[UnitName("player")][btn.buffID]["id"], BOOKTYPE_SPELL)
             castspellid = btn.buffID
@@ -3261,13 +3366,13 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
                     RecentCast = true
                 end
             else
-                if (mousebtn == "LeftButton" and not (AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
+                if (not useSmall and not (AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
                     -- Greater Blessing: block only in first BLESSINGTRESHOLD seconds after a GB cast
                     if lc > PALLYPOWER_GREATERBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD and lc <= PALLYPOWER_GREATERBLESSINGDURATION then
                         RecentCast = true
                     end
                 else
-                    -- Right-click small blessing: block only if timer comes from a small blessing cast (not a GB)
+                    -- Small blessing: block only if timer comes from a small blessing cast (not a GB)
                     if lc > PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD and lc <= PALLYPOWER_NORMALBLESSINGDURATION then
                         RecentCast = true
                     end
@@ -3358,7 +3463,7 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
                 PallyPower_RemoveFromTable(btn.need,UnitName(unit))
             end
 
-            if (RegularBlessings == false and mousebtn == "LeftButton" and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
+            if (RegularBlessings == false and not useSmall and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
                 for unit, stats in CurrentBuffs[btn.classID] do
                     if UnitIsVisible(unit) then
                         tinsert(LastCastOn[btn.classID], unit)
@@ -3416,14 +3521,6 @@ end
 function PallyPower_AutoBless(mousebutton)
     local rankInfo = PallyPower_ScanSpells()
 
-    RestorSelfAutoCastTimeOut = 1
-    if (GetCVar("autoSelfCast") == "1") then
-        RestorSelfAutoCast = true
-        SetCVar("autoSelfCast", "0")
-    end
-
-    DoEmote("STAND") -- Force player stand
-
     classbtn = lastClassBtn
     lastClassBtnTime = PALLYPOWER_RESTARTAUTOBLESS
     local btn = getglobal("PallyPowerBuffBarBuff" .. classbtn)
@@ -3432,16 +3529,47 @@ function PallyPower_AutoBless(mousebutton)
         PallyPower_Assignments[UnitName("player")][btn.classID] and 
         PallyPower_Assignments[UnitName("player")][btn.classID] ~= -1) then
     
-        ClearTarget()
-        local castspellid = -1
-        local castspelloverride = -1
-        
         if AllPallys[UnitName("player")][btn.buffID] == nil then 
             lastClassBtn = lastClassBtn + 1
             -- classID == 9 is for pets
             if (lastClassBtn > 10 or btn.classID == 9) then lastClassBtn = 1 end 
             return 
         end
+
+        -- Smart single-target rebuff: if only 1 member needs buff and others have it, downgrade Hotkey2 to small blessing
+        local useSmall = (mousebutton == "Hotkey1")
+        if (mousebutton == "Hotkey2" and PP_PerUser.smartrebuff and btn.need and table.getn(btn.need) == 1 and btn.have and table.getn(btn.have) > 0) then
+            useSmall = true
+        end
+
+        local isGreater = (not useSmall and not (AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"]) and RegularBlessings == false)
+
+        -- Pre-cast Reagent Check for Greater Blessings
+        if isGreater and PP_Symbols < 1 then
+            PlaySound("igQuestFailed")
+            PallyPower_ShowFeedback(PALLYPOWER_MISSING_SYMBOLS, 1, 0, 0)
+            return
+        end
+
+        -- Pre-cast Mana Check
+        local blessType = (isGreater and PALLYPOWER_GREATERBLESSING) or PALLYPOWER_SMALLBLESSING
+        if not PallyPower_HasEnoughMana(btn.buffID, blessType) then
+            PlaySound("igQuestFailed")
+            PallyPower_ShowFeedback(PALLYPOWER_NOT_ENOUGH_MANA, 1, 0, 0)
+            return
+        end
+
+        RestorSelfAutoCastTimeOut = 1
+        if (GetCVar("autoSelfCast") == "1") then
+            RestorSelfAutoCast = true
+            SetCVar("autoSelfCast", "0")
+        end
+
+        DoEmote("STAND") -- Force player stand
+
+        ClearTarget()
+        local castspellid = -1
+        local castspelloverride = -1
 
         PP_Debug("Casting " .. btn.buffID .. " on " .. btn.classID)
 
@@ -3450,14 +3578,14 @@ function PallyPower_AutoBless(mousebutton)
             return
         end
 
-        if (mousebutton == "Hotkey1") then
+        if useSmall then
             if GetSpellCooldown(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL) < 1 then
                 CastSpell(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL)
                 castspellid = btn.buffID
             else
                 return
             end
-        elseif (mousebutton == "Hotkey2") then
+        else
             if GetSpellCooldown(AllPallys[UnitName("player")][btn.buffID]["id"], BOOKTYPE_SPELL) < 1 then
                 CastSpell(AllPallys[UnitName("player")][btn.buffID]["id"], BOOKTYPE_SPELL)
                 castspellid = btn.buffID
@@ -3475,7 +3603,7 @@ function PallyPower_AutoBless(mousebutton)
                     RecentCast = true
                 end
             else
-                if (mousebutton == "Hotkey2" and not (AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
+                if (not useSmall and not (AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
                     if lc > PALLYPOWER_GREATERBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD and lc <= PALLYPOWER_GREATERBLESSINGDURATION then
                         RecentCast = true
                     end
@@ -3543,7 +3671,7 @@ function PallyPower_AutoBless(mousebutton)
                         LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
                         LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
                     else
-                        if (mousebutton == "Hotkey2" and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
+                        if (not useSmall and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
                             LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
                         else
                             if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
@@ -3559,7 +3687,7 @@ function PallyPower_AutoBless(mousebutton)
                         PallyPower_RemoveFromTable(btn.need,UnitName(unit))
                     end
 
-                    if (RegularBlessings == false and mousebutton == "Hotkey2" and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
+                    if (RegularBlessings == false and not useSmall and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
                         for unit, stats in CurrentBuffs[btn.classID] do
                             if UnitIsVisible(unit) then
                                 tinsert(LastCastOn[btn.classID], unit)
