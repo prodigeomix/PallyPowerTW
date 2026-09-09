@@ -218,6 +218,7 @@ function PallyPower_ColorBuffBarOption()
     else
         PP_PerUser.colorbuffbar = false
     end
+    uiDirty = true
 end
 
 function PallyPower_HideFullyBuffedOption()
@@ -1708,13 +1709,25 @@ function PallyPower_ScanSpells()
                 for id, name in PallyPower_BlessingID do
                     if ((name == bless) and (greaterBless)) then
                         local _, _, rank = string.find(spellRank, PallyPower_RankSearch)
-                        if (RankInfo[id] and spellRank < RankInfo[id]["rank"]) then
+                        -- Use extracted numeric rank (not full "Rank N" string) for comparison.
+                        -- Comparing spellRank ("Rank 1") against rank ("1") is always false in
+                        -- Lua string comparison ('R' > '1'), which caused Greater Blessings to be
+                        -- skipped when scanned before the small-blessing entry.
+                        if (RankInfo[id] and rank < RankInfo[id]["rank"]) then
+                            -- Lower-rank Greater Blessing: skip, keep the higher one already stored
                         elseif RankInfo[id] then
-                            -- Guard: RankInfo[id] is populated by the small-blessing scan earlier in
-                            -- this same loop. If the spellbook ever orders the Greater entry first,
-                            -- skip rather than index a nil table (the next scan pass will catch up).
+                            -- Greater Blessing scanned after small blessing: update id to the
+                            -- greater spell and refresh the name, keep the rank from the small scan
                             RankInfo[id]["id"] = i
                             RankInfo[id]["name"] = name
+                        else
+                            -- Greater Blessing scanned before small blessing: create the entry
+                            RankInfo[id] = {}
+                            RankInfo[id]["rank"] = rank
+                            RankInfo[id]["id"] = i
+                            RankInfo[id]["idsmall"] = i
+                            RankInfo[id]["name"] = name
+                            RankInfo[id]["talent"] = 0
                         end
                     end
                 end
@@ -3448,12 +3461,13 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
             else
                 if (mousebtn == "LeftButton" and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
                     LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
+                    LastCastPlayer[stats.name] = PALLYPOWER_GREATERBLESSINGDURATION
                 else
                     if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
                         LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
                     end
+                    LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
                 end
-                LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
             end
 
             if not skipclear and not RecentCast then
@@ -3673,12 +3687,13 @@ function PallyPower_AutoBless(mousebutton)
                     else
                         if (not useSmall and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
                             LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
+                            LastCastPlayer[stats.name] = PALLYPOWER_GREATERBLESSINGDURATION
                         else
                             if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
                                 LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
                             end
+                            LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
                         end
-                        LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
                     end
                     if not skipclear and not RecentCast then
                         LastCastOn[btn.classID] = {}
