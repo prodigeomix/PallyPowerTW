@@ -1,7 +1,10 @@
 local initialized = false
 
-local TURTLE_REALMS = { Nordanaar=true, ["Tel'Abim"]=true, Ambershire=true, ["South Seas"]=true, ["N'Zoth"]=true, ["Eversong Wilds"]=true}
-local IS_TURTLE = TURTLE_REALMS[GetRealmName()] or false
+-- Detect Turtle WoW / Capybara by build number (7272) instead of a hardcoded realm list.
+-- This is future-proof: works on all Turtle-compatible realms (including Capybara)
+-- without needing to maintain a realm-name list that changes between private servers.
+local _, wowBuild = GetBuildInfo()
+local IS_TURTLE = tonumber(wowBuild) == 7272
 
 PALLYPOWER_GREATERBLESSINGDURATION = IS_TURTLE and (30 * 60) or (15 * 60)
 PALLYPOWER_NORMALBLESSINGDURATION = IS_TURTLE and (10 * 60) or (5 * 60)
@@ -60,6 +63,7 @@ PP_PerUser = {
     usehdicons = false,
     transparency = 0.5,
     hidefullybuffed = false,
+    colorbuffbar = false,
     smartrebuff = true
 }
 PP_UnitXPDllLoaded = false
