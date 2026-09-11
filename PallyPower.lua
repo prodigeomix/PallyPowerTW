@@ -1,10 +1,19 @@
 local initialized = false
 
--- Detect Turtle WoW / Capybara by build number (7272) instead of a hardcoded realm list.
--- This is future-proof: works on all Turtle-compatible realms (including Capybara)
--- without needing to maintain a realm-name list that changes between private servers.
+-- Detect Turtle WoW / Capybara:
+-- Official Turtle realms run client build 5875 with known realm names.
+-- Capybara (1.18.1 client) runs build 7272.
+local TURTLE_REALMS = {
+    ["Nordanaar"] = true,
+    ["Tel'Abim"] = true,
+    ["Ambershire"] = true,
+    ["South Seas"] = true,
+    ["N'Zoth"] = true,
+    ["Eversong Wilds"] = true,
+}
 local _, wowBuild = GetBuildInfo()
-local IS_TURTLE = tonumber(wowBuild) == 7272
+local currentRealm = GetRealmName()
+local IS_TURTLE = (tonumber(wowBuild) == 7272) or (currentRealm and TURTLE_REALMS[currentRealm] == true)
 
 PALLYPOWER_GREATERBLESSINGDURATION = IS_TURTLE and (30 * 60) or (15 * 60)
 PALLYPOWER_NORMALBLESSINGDURATION = IS_TURTLE and (10 * 60) or (5 * 60)
@@ -506,6 +515,16 @@ function PallyPower_OnEvent(event,arg1)
     end
 
     if (event == "PLAYER_ENTERING_WORLD") then
+        local currentRealm = GetRealmName()
+        if (tonumber(wowBuild) == 7272) or (currentRealm and TURTLE_REALMS[currentRealm]) then
+            IS_TURTLE = true
+            PALLYPOWER_GREATERBLESSINGDURATION = 30 * 60
+            PALLYPOWER_NORMALBLESSINGDURATION = 10 * 60
+        else
+            IS_TURTLE = false
+            PALLYPOWER_GREATERBLESSINGDURATION = 15 * 60
+            PALLYPOWER_NORMALBLESSINGDURATION = 5 * 60
+        end
         RebuildRoster()
         PruneCurrentBuffs()
         for i = 1, table.getn(RosterUnits) do
@@ -772,6 +791,7 @@ function PallyPower_TableLength(T)
  end
 
  function PallyPower_RemoveFromTable(itab, ivalue)
+    if not itab then return end
     for i, v in ipairs(itab) do
         if v == ivalue then
             table.remove(itab, i)
@@ -1658,10 +1678,11 @@ function PallyPower_ScanSpells()
             for id, name in PallyPower_AuraID do
                 if (name == aura) then
                     local _, _, rank = string.find(spellRank, PallyPower_RankSearch)
-                    if (AuraRankInfo[id] and spellRank < AuraRankInfo[id]["rank"]) then
-                    else
+                    local rankNum = tonumber(rank) or 1
+                    if (not AuraRankInfo[id]) or (rankNum > (AuraRankInfo[id]["rankNum"] or 0)) then
                         AuraRankInfo[id] = {}
                         AuraRankInfo[id]["rank"] = rank
+                        AuraRankInfo[id]["rankNum"] = rankNum
                         AuraRankInfo[id]["id"] = i
                         AuraRankInfo[id]["name"] = name
                         AuraRankInfo[id]["talent"] = 0
@@ -1675,10 +1696,11 @@ function PallyPower_ScanSpells()
             for id, name in PallyPower_SealID do
                 if (name == seal) then
                     local _, _, rank = string.find(spellRank, PallyPower_RankSearch)
-                    if (SealRankInfo[id] and spellRank < SealRankInfo[id]["rank"]) then
-                    else
+                    local rankNum = tonumber(rank) or 1
+                    if (not SealRankInfo[id]) or (rankNum > (SealRankInfo[id]["rankNum"] or 0)) then
                         SealRankInfo[id] = {}
                         SealRankInfo[id]["rank"] = rank
+                        SealRankInfo[id]["rankNum"] = rankNum
                         SealRankInfo[id]["id"] = i
                         SealRankInfo[id]["name"] = name
                         SealRankInfo[id]["talent"] = 0
@@ -1693,14 +1715,26 @@ function PallyPower_ScanSpells()
             for id, name in PallyPower_BlessingID do
                 if ((name == bless) and (not greaterBless)) then
                     local _, _, rank = string.find(spellRank, PallyPower_RankSearch)
-                    if (RankInfo[id] and spellRank < RankInfo[id]["rank"]) then
+                    local rankNum = tonumber(rank) or 1
+                    if not RankInfo[id] then
+                        RankInfo[id] = {
+                            name = name,
+                            talent = 0,
+                            ranksmall = rankNum,
+                            rank = rank,
+                            idsmall = i,
+                            id = i,
+                        }
                     else
-                        RankInfo[id] = {}
-                        RankInfo[id]["rank"] = rank
-                        RankInfo[id]["id"] = i
-                        RankInfo[id]["idsmall"] = i
-                        RankInfo[id]["name"] = name
-                        RankInfo[id]["talent"] = 0
+                        if not RankInfo[id]["ranksmall"] or rankNum > RankInfo[id]["ranksmall"] then
+                            RankInfo[id]["ranksmall"] = rankNum
+                            RankInfo[id]["idsmall"] = i
+                            RankInfo[id]["rank"] = rank
+                            -- If no Greater Blessing learned yet, default greater id to this highest small id
+                            if not RankInfo[id]["rankgrtr"] then
+                                RankInfo[id]["id"] = i
+                            end
+                        end
                     end
                 end
             end
@@ -1713,25 +1747,21 @@ function PallyPower_ScanSpells()
                 for id, name in PallyPower_BlessingID do
                     if ((name == bless) and (greaterBless)) then
                         local _, _, rank = string.find(spellRank, PallyPower_RankSearch)
-                        -- Use extracted numeric rank (not full "Rank N" string) for comparison.
-                        -- Comparing spellRank ("Rank 1") against rank ("1") is always false in
-                        -- Lua string comparison ('R' > '1'), which caused Greater Blessings to be
-                        -- skipped when scanned before the small-blessing entry.
-                        if (RankInfo[id] and rank < RankInfo[id]["rank"]) then
-                            -- Lower-rank Greater Blessing: skip, keep the higher one already stored
-                        elseif RankInfo[id] then
-                            -- Greater Blessing scanned after small blessing: update id to the
-                            -- greater spell and refresh the name, keep the rank from the small scan
-                            RankInfo[id]["id"] = i
-                            RankInfo[id]["name"] = name
+                        local rankNum = tonumber(rank) or 1
+                        if not RankInfo[id] then
+                            RankInfo[id] = {
+                                name = name,
+                                talent = 0,
+                                rankgrtr = rankNum,
+                                id = i,
+                                idsmall = i,
+                                rank = rank,
+                            }
                         else
-                            -- Greater Blessing scanned before small blessing: create the entry
-                            RankInfo[id] = {}
-                            RankInfo[id]["rank"] = rank
-                            RankInfo[id]["id"] = i
-                            RankInfo[id]["idsmall"] = i
-                            RankInfo[id]["name"] = name
-                            RankInfo[id]["talent"] = 0
+                            if not RankInfo[id]["rankgrtr"] or rankNum > RankInfo[id]["rankgrtr"] then
+                                RankInfo[id]["rankgrtr"] = rankNum
+                                RankInfo[id]["id"] = i
+                            end
                         end
                     end
                 end
@@ -3355,20 +3385,12 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
         return
     end
 
-    if useSmall then
-        if GetSpellCooldown(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL) < 1 then
-            CastSpell(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL)
-            castspellid = btn.buffID
-        else
-            return
-        end
+    local spellToCast = isGreater and AllPallys[UnitName("player")][btn.buffID]["id"] or AllPallys[UnitName("player")][btn.buffID]["idsmall"]
+    if GetSpellCooldown(spellToCast, BOOKTYPE_SPELL) < 1 then
+        CastSpell(spellToCast, BOOKTYPE_SPELL)
+        castspellid = btn.buffID
     else
-        if GetSpellCooldown(AllPallys[UnitName("player")][btn.buffID]["id"], BOOKTYPE_SPELL) < 1 then
-            CastSpell(AllPallys[UnitName("player")][btn.buffID]["id"], BOOKTYPE_SPELL)
-            castspellid = btn.buffID
-        else
-            return
-        end
+        return
     end
 
     local RecentCast = false
@@ -3377,23 +3399,9 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
     if not IsShiftKeyDown() then
         local lc = LastCast[btn.buffID .. btn.classID]
         if lc then
-            if (RegularBlessings == true) then
-                -- Block only in first BLESSINGTRESHOLD seconds after a normal cast
-                if lc > PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD and lc <= PALLYPOWER_NORMALBLESSINGDURATION then
-                    RecentCast = true
-                end
-            else
-                if (not useSmall and not (AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
-                    -- Greater Blessing: block only in first BLESSINGTRESHOLD seconds after a GB cast
-                    if lc > PALLYPOWER_GREATERBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD and lc <= PALLYPOWER_GREATERBLESSINGDURATION then
-                        RecentCast = true
-                    end
-                else
-                    -- Small blessing: block only if timer comes from a small blessing cast (not a GB)
-                    if lc > PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD and lc <= PALLYPOWER_NORMALBLESSINGDURATION then
-                        RecentCast = true
-                    end
-                end
+            local maxDur = isGreater and PALLYPOWER_GREATERBLESSINGDURATION or PALLYPOWER_NORMALBLESSINGDURATION
+            if lc > maxDur - PALLYPOWER_BLESSINGTRESHOLD and lc <= maxDur then
+                RecentCast = true
             end
         end
     end
@@ -3459,19 +3467,13 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
             recentCastProtection = 2
             uiDirty = true
 
-            if (RegularBlessings == true) then
-                LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
-                LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
+            if isGreater then
+                LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
             else
-                if (mousebtn == "LeftButton" and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
-                    LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
-                    LastCastPlayer[stats.name] = PALLYPOWER_GREATERBLESSINGDURATION
-                else
-                    if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
-                        LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
-                    end
-                    LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
+                if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
+                    LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
                 end
+                LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
             end
 
             if not skipclear and not RecentCast then
@@ -3481,7 +3483,7 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
                 PallyPower_RemoveFromTable(btn.need,UnitName(unit))
             end
 
-            if (RegularBlessings == false and not useSmall and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
+            if isGreater then
                 for unit, stats in CurrentBuffs[btn.classID] do
                     if UnitIsVisible(unit) then
                         tinsert(LastCastOn[btn.classID], unit)
@@ -3596,40 +3598,21 @@ function PallyPower_AutoBless(mousebutton)
             return
         end
 
-        if useSmall then
-            if GetSpellCooldown(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL) < 1 then
-                CastSpell(AllPallys[UnitName("player")][btn.buffID]["idsmall"], BOOKTYPE_SPELL)
-                castspellid = btn.buffID
-            else
-                return
-            end
+        local spellToCast = isGreater and AllPallys[UnitName("player")][btn.buffID]["id"] or AllPallys[UnitName("player")][btn.buffID]["idsmall"]
+        if GetSpellCooldown(spellToCast, BOOKTYPE_SPELL) < 1 then
+            CastSpell(spellToCast, BOOKTYPE_SPELL)
+            castspellid = btn.buffID
         else
-            if GetSpellCooldown(AllPallys[UnitName("player")][btn.buffID]["id"], BOOKTYPE_SPELL) < 1 then
-                CastSpell(AllPallys[UnitName("player")][btn.buffID]["id"], BOOKTYPE_SPELL)
-                castspellid = btn.buffID
-            else
-                return
-            end
+            return
         end
 
         local RecentCast = false
         local skipclear = false
         local lc = LastCast[btn.buffID .. btn.classID]
         if lc then
-            if (RegularBlessings == true) then
-                if lc > PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD and lc <= PALLYPOWER_NORMALBLESSINGDURATION then
-                    RecentCast = true
-                end
-            else
-                if (not useSmall and not (AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
-                    if lc > PALLYPOWER_GREATERBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD and lc <= PALLYPOWER_GREATERBLESSINGDURATION then
-                        RecentCast = true
-                    end
-                else
-                    if lc > PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD and lc <= PALLYPOWER_NORMALBLESSINGDURATION then
-                        RecentCast = true
-                    end
-                end
+            local maxDur = isGreater and PALLYPOWER_GREATERBLESSINGDURATION or PALLYPOWER_NORMALBLESSINGDURATION
+            if lc > maxDur - PALLYPOWER_BLESSINGTRESHOLD and lc <= maxDur then
+                RecentCast = true
             end
         end
         local LastRecentCast = RecentCast
@@ -3685,19 +3668,13 @@ function PallyPower_AutoBless(mousebutton)
                     recentCastProtection = 2
                     uiDirty = true
 
-                    if (RegularBlessings == true) then
-                        LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
-                        LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
+                    if isGreater then
+                        LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
                     else
-                        if (not useSmall and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
-                            LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
-                            LastCastPlayer[stats.name] = PALLYPOWER_GREATERBLESSINGDURATION
-                        else
-                            if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
-                                LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
-                            end
-                            LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
+                        if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
+                            LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
                         end
+                        LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
                     end
                     if not skipclear and not RecentCast then
                         LastCastOn[btn.classID] = {}
@@ -3706,7 +3683,7 @@ function PallyPower_AutoBless(mousebutton)
                         PallyPower_RemoveFromTable(btn.need,UnitName(unit))
                     end
 
-                    if (RegularBlessings == false and not useSmall and not(AllPallys[UnitName("player")][btn.buffID]["id"] == AllPallys[UnitName("player")][btn.buffID]["idsmall"])) then
+                    if isGreater then
                         for unit, stats in CurrentBuffs[btn.classID] do
                             if UnitIsVisible(unit) then
                                 tinsert(LastCastOn[btn.classID], unit)
