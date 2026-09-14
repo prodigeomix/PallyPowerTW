@@ -800,6 +800,14 @@ function PallyPower_TableLength(T)
     end
 end
 
+function PallyPower_TableContains(itab, ivalue)
+    if not itab or not ivalue then return false end
+    for _, v in itab do
+        if v == ivalue then return true end
+    end
+    return false
+end
+
 function PallyPowerPallySelectorButton_OnClick(btn)
     local pname = getglobal(btn:GetName() .. "Text"):GetText()
     if pname and pname ~= "" then
@@ -3307,6 +3315,197 @@ function PallyPowerBuffButton_OnLoad(btn)
     this:SetBackdropColor(0, 0, 0, PP_PerUser.transparency)
 end
 
+function PallyPower_CastingSalvationOnTank(punit, castspell, overridespell)
+    if ( castspell == 2 and overridespell == -1 ) or overridespell == 2 then --Salvation
+        local pname = UnitName(punit)
+        if PallyPower_Tanks[pname] and PallyPower_Tanks[pname] == true then
+            return true
+        else
+            return false    
+        end
+    else
+        return false
+    end
+end
+
+function PallyPower_TargetAndCast(btn, isGreater, castspellid)
+    if not CurrentBuffs[btn.classID] then return false end
+
+    if not isGreater then
+        -- Small / Normal Blessing: Target only members who actually need the buff
+        local targetUnit = nil
+        local targetStats = nil
+
+        for unit, stats in CurrentBuffs[btn.classID] do
+            local pname = UnitName("player")
+            local indID = GetNormalBlessings(pname, btn.classID, stats.name)
+            local skipIndividual = (indID ~= -1 and AllPallys[pname] and AllPallys[pname][indID] ~= nil)
+
+            if (not skipIndividual) and
+               (SpellCanTargetUnit(unit) or UnitIsUnit(unit, "player")) and
+               (not UnitIsDeadOrGhost(unit)) and
+               UnitIsVisible(unit) and
+               PallyPower_CheckTargetLoS(unit) and
+               (not PallyPower_CastingSalvationOnTank(unit, castspellid, -1))
+            then
+                local lastT = LastCastPlayer[stats.name]
+                local eligible = false
+
+                if IsShiftKeyDown() then
+                    eligible = true
+                elseif btn.need and table.getn(btn.need) > 0 then
+                    -- If some members need the buff, ONLY consider members in btn.need
+                    if PallyPower_TableContains(btn.need, stats.name) then
+                        -- Anti-double-click: do not recast if cast within last 5 seconds
+                        if not (lastT and lastT > PALLYPOWER_NORMALBLESSINGDURATION - 5) then
+                            eligible = true
+                        end
+                    end
+                else
+                    -- Nobody missing: allow refreshing members whose normal blessing is expiring soon
+                    if lastT and (lastT < PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD) then
+                        eligible = true
+                    end
+                end
+
+                if eligible then
+                    targetUnit = unit
+                    targetStats = stats
+                    break
+                end
+            end
+        end
+
+        if targetUnit then
+            PP_Debug("Trying to cast small blessing on " .. targetUnit)
+            SpellTargetUnit(targetUnit)
+            recentCastProtection = 2
+            uiDirty = true
+
+            if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
+                LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
+            end
+            LastCastPlayer[targetStats.name] = PALLYPOWER_NORMALBLESSINGDURATION
+
+            PallyPower_RemoveFromTable(btn.need, targetStats.name)
+            tinsert(LastCastOn[btn.classID], targetUnit)
+
+            PallyPower_ShowFeedback(
+                format(
+                    PallyPower_Casting,
+                    PallyPower_BlessingID[btn.buffID],
+                    PallyPower_ClassID[btn.classID],
+                    UnitName(targetUnit)
+                ), 0, 1, 0
+            )
+            TargetLastTarget()
+            return true
+        end
+
+        return false
+    else
+        -- Greater Blessing
+        if (btn.classID == 9) then
+            local player = UnitName("player")
+            if PallyPower_Assignments[player][0] ~= PallyPower_Assignments[player][9] then
+                SpellStopTargeting()
+                TargetLastTarget()
+                PallyPower_ShowFeedback(
+                    format(PallyPower_BlessingsDiffer),
+                    1, 1, 0
+                )
+                return false
+            end
+        end
+
+        local RecentCast = false
+        if not IsShiftKeyDown() then
+            local lc = LastCast[btn.buffID .. btn.classID]
+            if lc then
+                if lc > PALLYPOWER_GREATERBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD and lc <= PALLYPOWER_GREATERBLESSINGDURATION then
+                    RecentCast = true
+                end
+            end
+        end
+
+        local targetUnit = nil
+        local targetStats = nil
+
+        -- Priority 1: A class member who needs the buff (in btn.need)
+        if btn.need and table.getn(btn.need) > 0 then
+            for unit, stats in CurrentBuffs[btn.classID] do
+                if PallyPower_TableContains(btn.need, stats.name) and
+                   (SpellCanTargetUnit(unit) or UnitIsUnit(unit, "player")) and
+                   (not UnitIsDeadOrGhost(unit)) and UnitIsVisible(unit) and
+                   PallyPower_CheckTargetLoS(unit) and
+                   (not PallyPower_CastingSalvationOnTank(unit, castspellid, -1))
+                then
+                    targetUnit = unit
+                    targetStats = stats
+                    break
+                end
+            end
+        end
+
+        -- Priority 2: Any valid class member in range (unless RecentCast on this unit)
+        if not targetUnit then
+            for unit, stats in CurrentBuffs[btn.classID] do
+                if (SpellCanTargetUnit(unit) or UnitIsUnit(unit, "player")) and
+                   (not UnitIsDeadOrGhost(unit)) and UnitIsVisible(unit) and
+                   PallyPower_CheckTargetLoS(unit) and
+                   (not (RecentCast and PallyPower_TableContains(LastCastOn[btn.classID], unit))) and
+                   (not PallyPower_CastingSalvationOnTank(unit, castspellid, -1))
+                then
+                    targetUnit = unit
+                    targetStats = stats
+                    break
+                end
+            end
+        end
+
+        if targetUnit then
+            PP_Debug("Trying to cast Greater Blessing on " .. targetUnit)
+            SpellTargetUnit(targetUnit)
+            recentCastProtection = 2
+            uiDirty = true
+
+            LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
+            LastCastOn[btn.classID] = {}
+            for unit, stats in CurrentBuffs[btn.classID] do
+                if UnitIsVisible(unit) then
+                    tinsert(LastCastOn[btn.classID], unit)
+                end
+            end
+            if (btn.classID == 0 or btn.classID == 9) and (PallyPower_Assignments[UnitName("player")][0] == PallyPower_Assignments[UnitName("player")][9]) then
+                local classIDToFill = (btn.classID == 9) and 0 or 9
+                if CurrentBuffs[classIDToFill] ~= nil then
+                    LastCastOn[classIDToFill] = {}
+                    for unit, stats in CurrentBuffs[classIDToFill] do
+                        if UnitIsVisible(unit) then
+                            tinsert(LastCastOn[classIDToFill], unit)
+                        end
+                    end
+                    LastCast[btn.buffID .. classIDToFill] = PALLYPOWER_GREATERBLESSINGDURATION
+                end
+            end
+            btn.need = {}
+
+            PallyPower_ShowFeedback(
+                format(
+                    PallyPower_Casting,
+                    PallyPower_BlessingID[btn.buffID],
+                    PallyPower_ClassID[btn.classID],
+                    UnitName(targetUnit)
+                ), 0, 1, 0
+            )
+            TargetLastTarget()
+            return true
+        end
+
+        return false
+    end
+end
+
 function PallyPowerBuffButton_OnClick(btn, mousebtn)
     if (btn == getglobal("PallyPowerBuffBarRF")) and (hasRighteousFury == true) and 
        (nameRighteousFury ~= nil)
@@ -3376,7 +3575,6 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
 
     ClearTarget()
     local castspellid = -1
-    local castspelloverride = -1    
 
     PP_Debug("Casting " .. btn.buffID .. " on " .. btn.classID)
 
@@ -3393,148 +3591,13 @@ function PallyPowerBuffButton_OnClick(btn, mousebtn)
         return
     end
 
-    local RecentCast = false
-    local skipclear = false
-    -- Skip recentCast protection when Shift key is held down
-    if not IsShiftKeyDown() then
-        local lc = LastCast[btn.buffID .. btn.classID]
-        if lc then
-            local maxDur = isGreater and PALLYPOWER_GREATERBLESSINGDURATION or PALLYPOWER_NORMALBLESSINGDURATION
-            if lc > maxDur - PALLYPOWER_BLESSINGTRESHOLD and lc <= maxDur then
-                RecentCast = true
-            end
-        end
-    end
-    local LastRecentCast = RecentCast
-    if not CurrentBuffs[btn.classID] then
+    if not PallyPower_TargetAndCast(btn, isGreater, castspellid) then
         SpellStopTargeting()
         TargetLastTarget()
         PallyPower_ShowFeedback(
             format(PallyPower_CouldntFind, PallyPower_BlessingID[btn.buffID], PallyPower_ClassID[btn.classID]),
             1, 1, 0
         )
-        return
-    end
-    for unit, stats in CurrentBuffs[btn.classID] do
-        castspelloverride = -1
-        if RecentCast ~= LastRecentCast then
-            RecentCast = LastRecentCast
-        end
-        skipclear = false
-
-        -- Disable Greater Blessing LeftButton for pets if assignments differ
-        if (btn.classID == 9) and (mousebtn == "LeftButton") then
-            local player = UnitName("player")
-            if PallyPower_Assignments[player][0] ~= PallyPower_Assignments[player][9] then
-                SpellStopTargeting()
-                TargetLastTarget()
-                PallyPower_ShowFeedback(
-                    format(PallyPower_BlessingsDiffer),
-                    1, 1, 0 -- Yellow color for feedback
-                )
-                return
-            end
-        end
-
-        -- Members with a castable individual assignment are handled exclusively by the individual
-        -- pre-pass (PallyPower_CastIndividualBlessing): their individual blessing REPLACES the class
-        -- one, so the class small blessing must never also be cast on them. This matches the UI's
-        -- hasBuffs logic, which counts them as covered only by their individual blessing.
-        local skipIndividual = false
-        if mousebtn == "RightButton" then
-            local bltest = GetNormalBlessings(UnitName("player"),btn.classID, stats.name)
-            if bltest ~= -1 and AllPallys[UnitName("player")][bltest] then
-                skipIndividual = true
-            end
-            if string.find(table.concat(btn.need, " "), stats.name) or
-               (bltest ~= -1 and LastCastPlayer[stats.name] and ( LastCastPlayer[stats.name] < PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD ) ) then
-                RecentCast = false
-                skipclear = true
-                castspelloverride = bltest
-            end
-        end
-
-        if
-            (not skipIndividual) and
-            (SpellCanTargetUnit(unit) or UnitIsUnit(unit, "player")) and
-                (not UnitIsDeadOrGhost(unit)) and PallyPower_CheckTargetLoS(unit) and
-                not (RecentCast and string.find(table.concat(LastCastOn[btn.classID], " "), unit)) and
-                (not PallyPower_CastingSalvationOnTank(unit, castspellid, castspelloverride))
-        then
-            PP_Debug("Trying to cast on " .. unit)
-
-            SpellTargetUnit(unit)
-            recentCastProtection = 2
-            uiDirty = true
-
-            if isGreater then
-                LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
-            else
-                if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
-                    LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
-                end
-                LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
-            end
-
-            if not skipclear and not RecentCast then
-                LastCastOn[btn.classID] = {}
-            end
-            if skipclear then
-                PallyPower_RemoveFromTable(btn.need,UnitName(unit))
-            end
-
-            if isGreater then
-                for unit, stats in CurrentBuffs[btn.classID] do
-                    if UnitIsVisible(unit) then
-                        tinsert(LastCastOn[btn.classID], unit)
-                    end
-                end
-                if (btn.classID == 0 or btn.classID == 9) and (PallyPower_Assignments[UnitName("player")][0] == PallyPower_Assignments[UnitName("player")][9]) then
-                    local classIDToFill = (btn.classID == 9) and 0 or 9
-                    if CurrentBuffs[classIDToFill] ~= nil then
-                        for unit, stats in CurrentBuffs[classIDToFill] do
-                            if UnitIsVisible(unit) then
-                                tinsert(LastCastOn[classIDToFill], unit)
-                            end
-                        end
-                        LastCast[btn.buffID .. classIDToFill] = PALLYPOWER_GREATERBLESSINGDURATION
-                    end
-                end
-            else
-                tinsert(LastCastOn[btn.classID], unit)
-            end
-
-            PallyPower_ShowFeedback(
-                format(
-                    PallyPower_Casting,
-                    PallyPower_BlessingID[btn.buffID],
-                    PallyPower_ClassID[btn.classID],
-                    UnitName(unit)
-                ), 0, 1, 0 -- Green color for feedback
-            )
-            uiDirty = true
-            TargetLastTarget()
-            return
-        end
-    end
-    SpellStopTargeting()
-    TargetLastTarget()
-    PallyPower_ShowFeedback(
-        format(PallyPower_CouldntFind, PallyPower_BlessingID[btn.buffID], PallyPower_ClassID[btn.classID]),
-        1, 1, 0 -- Yellow color for feedback
-    )
-end
-
-function PallyPower_CastingSalvationOnTank(punit, castspell, overridespell)
-    if ( castspell == 2 and overridespell == -1 ) or overridespell == 2 then --Salvation
-        local pname = UnitName(punit)
-        if PallyPower_Tanks[pname] and PallyPower_Tanks[pname] == true then
-            return true
-        else
-            return false    
-        end
-    else
-        return false
     end
 end
 
@@ -3589,7 +3652,6 @@ function PallyPower_AutoBless(mousebutton)
 
         ClearTarget()
         local castspellid = -1
-        local castspelloverride = -1
 
         PP_Debug("Casting " .. btn.buffID .. " on " .. btn.classID)
 
@@ -3606,127 +3668,17 @@ function PallyPower_AutoBless(mousebutton)
             return
         end
 
-        local RecentCast = false
-        local skipclear = false
-        local lc = LastCast[btn.buffID .. btn.classID]
-        if lc then
-            local maxDur = isGreater and PALLYPOWER_GREATERBLESSINGDURATION or PALLYPOWER_NORMALBLESSINGDURATION
-            if lc > maxDur - PALLYPOWER_BLESSINGTRESHOLD and lc <= maxDur then
-                RecentCast = true
-            end
+        if not PallyPower_TargetAndCast(btn, isGreater, castspellid) then
+            SpellStopTargeting()
+            TargetLastTarget()
+            PallyPower_ShowFeedback(
+                format(PallyPower_CouldntFind, PallyPower_BlessingID[btn.buffID], PallyPower_ClassID[btn.classID]),
+                1, 1, 0 --Yellow feedback for not finding a target
+            )
+            lastClassBtn = lastClassBtn + 1
+            -- classID == 9 is for pets
+            if (lastClassBtn > 10 or btn.classID == 9) then lastClassBtn = 1 end 
         end
-        local LastRecentCast = RecentCast
-        if (btn.classID ~= nil and CurrentBuffs[btn.classID]) then
-            
-            for unit, stats in CurrentBuffs[btn.classID] do
-                castspelloverride = -1
-                if RecentCast ~= LastRecentCast then
-                    RecentCast = LastRecentCast
-                end
-                skipclear = false
-
-                -- Disable Greater Blessing Hotkey2 for pets if assignments differ
-                if (btn.classID == 9) and (mousebutton == "Hotkey2") then
-                    local player = UnitName("player")
-                    if PallyPower_Assignments[player][0] ~= PallyPower_Assignments[player][9] then
-                        SpellStopTargeting()
-                        TargetLastTarget()
-                        PallyPower_ShowFeedback(
-                            format(PallyPower_BlessingsDiffer),
-                            1, 1, 0 -- Yellow color for feedback
-                        )
-                        return
-                    end
-                end
-
-                -- Members with a castable individual assignment are handled exclusively by the
-                -- individual pre-pass: their individual blessing REPLACES the class one (see OnClick).
-                local skipIndividual = false
-                if mousebutton == "Hotkey1" then
-                    local bltest = GetNormalBlessings(UnitName("player"),btn.classID, stats.name)
-                    if bltest ~= -1 and AllPallys[UnitName("player")][bltest] then
-                        skipIndividual = true
-                    end
-                    if string.find(table.concat(btn.need, " "), stats.name) or
-                       (bltest ~= -1 and LastCastPlayer[stats.name] and ( LastCastPlayer[stats.name] < PALLYPOWER_NORMALBLESSINGDURATION - PALLYPOWER_BLESSINGTRESHOLD ) ) then
-                        RecentCast = false
-                        skipclear = true
-                        castspelloverride = bltest
-                    end
-                end
-
-                if
-                        (not skipIndividual) and
-                        (SpellCanTargetUnit(unit) or UnitIsUnit(unit, "player")) and
-                            (not UnitIsDeadOrGhost(unit)) and PallyPower_CheckTargetLoS(unit) and
-                            not (RecentCast and string.find(table.concat(LastCastOn[btn.classID], " "), unit)) and
-                            (not PallyPower_CastingSalvationOnTank(unit, castspellid, castspelloverride))
-                then
-                    PP_Debug("Trying to cast on " .. unit)
-
-                    SpellTargetUnit(unit)
-                    recentCastProtection = 2
-                    uiDirty = true
-
-                    if isGreater then
-                        LastCast[btn.buffID .. btn.classID] = PALLYPOWER_GREATERBLESSINGDURATION
-                    else
-                        if LastCast[btn.buffID .. btn.classID] == nil or LastCast[btn.buffID .. btn.classID] < PALLYPOWER_NORMALBLESSINGDURATION then
-                            LastCast[btn.buffID .. btn.classID] = PALLYPOWER_NORMALBLESSINGDURATION
-                        end
-                        LastCastPlayer[stats.name] = PALLYPOWER_NORMALBLESSINGDURATION
-                    end
-                    if not skipclear and not RecentCast then
-                        LastCastOn[btn.classID] = {}
-                    end
-                    if skipclear then
-                        PallyPower_RemoveFromTable(btn.need,UnitName(unit))
-                    end
-
-                    if isGreater then
-                        for unit, stats in CurrentBuffs[btn.classID] do
-                            if UnitIsVisible(unit) then
-                                tinsert(LastCastOn[btn.classID], unit)
-                            end
-                        end
-                        if (btn.classID == 0 or btn.classID == 9) and (PallyPower_Assignments[UnitName("player")][0] == PallyPower_Assignments[UnitName("player")][9]) then
-                            local classIDToFill = (btn.classID == 9) and 0 or 9
-                            if CurrentBuffs[classIDToFill] ~= nil then
-                                for unit, stats in CurrentBuffs[classIDToFill] do
-                                    if UnitIsVisible(unit) then
-                                        tinsert(LastCastOn[classIDToFill], unit)
-                                    end
-                                end
-                                LastCast[btn.buffID .. classIDToFill] = PALLYPOWER_GREATERBLESSINGDURATION
-                            end
-                        end
-                    else
-                        tinsert(LastCastOn[btn.classID], unit)
-                    end
-
-                    PallyPower_ShowFeedback(
-                        format(
-                            PallyPower_Casting,
-                            PallyPower_BlessingID[btn.buffID],
-                            PallyPower_ClassID[btn.classID],
-                            UnitName(unit)
-                        ), 0, 1, 0 --Green feedback for casting
-                    )
-                    uiDirty = true
-                    TargetLastTarget()
-                    return
-                end
-            end
-        end
-        SpellStopTargeting()
-        TargetLastTarget()
-        PallyPower_ShowFeedback(
-            format(PallyPower_CouldntFind, PallyPower_BlessingID[btn.buffID], PallyPower_ClassID[btn.classID]),
-            1, 1, 0 --Yellow feedback for not finding a target
-        )
-        lastClassBtn = lastClassBtn + 1
-        -- classID == 9 is for pets
-        if (lastClassBtn > 10 or btn.classID == 9) then lastClassBtn = 1 end 
     else
         lastClassBtn = 1
     end
