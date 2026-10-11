@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  verification:
+    name: Verification Gate (Lua 5.0 Syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Addon Verification Tools
+        run: pip install git+https://github.com/prodigeomix/wow-addon-tools.git
+
+      - name: Run Lua 5.0 Syntax Validation
+        run: wow-tools validate-lua50 .

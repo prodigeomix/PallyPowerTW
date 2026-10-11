@@ -1,0 +1,33 @@
+name: Package Addon
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: PallyPowerTW
+
+      - name: Create Release Zip
+        run: |
+          rm -rf PallyPowerTW/.git PallyPowerTW/.github PallyPowerTW/tools PallyPowerTW/tests PallyPowerTW/__pycache__
+          rm -f PallyPowerTW/*.py PallyPowerTW/.gitignore PallyPowerTW/.editorconfig PallyPowerTW/.luarc.json PallyPowerTW/.gitattributes
+          rm -f PallyPowerTW/HANDOFF.md PallyPowerTW/AGENTS.md
+          zip -r PallyPowerTW.zip PallyPowerTW
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: PallyPowerTW.zip
+          generate_release_notes: true

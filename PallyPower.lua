@@ -88,13 +88,13 @@ for iinit = 0, 9 do
     LastCastOn[iinit] = {}
 end
 
-PP_Symbols = 0
-IsPally = 0
-lastClassBtn = 1
-lastClassBtnTime = PALLYPOWER_RESTARTAUTOBLESS
-hasRighteousFury = false
-nameRighteousFury = nil
-versionBumpDisplayed = false
+local PP_Symbols = 0
+local IsPally = 0
+local lastClassBtn = 1
+local lastClassBtnTime = PALLYPOWER_RESTARTAUTOBLESS
+local hasRighteousFury = false
+local nameRighteousFury = nil
+local versionBumpDisplayed = false
 
 Assignment = {}
 
@@ -3604,7 +3604,7 @@ end
 function PallyPower_AutoBless(mousebutton)
     local rankInfo = PallyPower_ScanSpells()
 
-    classbtn = lastClassBtn
+    local classbtn = lastClassBtn
     lastClassBtnTime = PALLYPOWER_RESTARTAUTOBLESS
     local btn = getglobal("PallyPowerBuffBarBuff" .. classbtn)
 
