@@ -1892,18 +1892,26 @@ function PallyPower_Clear(fromupdate, who)
     end
 end
 
+local lastReqTime = 0
 function PallyPower_RequestSend()
+    local now = GetTime()
+    if (now - lastReqTime) < 2.0 then return end
+    lastReqTime = now
     PallyPower_SendMessage("REQ")
 end
 
-function PallyPower_SendSelf()
+local lastSendSelfTime = 0
+function PallyPower_SendSelf(force)
+    local now = GetTime()
+    if not force and (now - lastSendSelfTime) < 1.0 then return end
+    lastSendSelfTime = now
     if not initialized or not AllPallys[UnitName("player")] then
         PallyPower_ScanSpells()
     end
     if not AllPallys[UnitName("player")] and not AllPallysAuras[UnitName("player")] then
         return
     end
-    msg = "SELF "
+    local msg = "SELF "
     local RankInfo = AllPallys[UnitName("player")]
     if not RankInfo then return end
     local i
@@ -2020,18 +2028,20 @@ function PallyPower_SendVersion()
 end
 
 function PallyPower_TacticaSendMessage(msg)
-    if GetNumRaidMembers() == 0 then
-        SendAddonMessage(TACTICA_PREFIX, msg, "PARTY", UnitName("player"))
+    local channel = (GetNumRaidMembers() == 0) and "PARTY" or "RAID"
+    if ChatThrottleLib and ChatThrottleLib.SendAddonMessage then
+        ChatThrottleLib:SendAddonMessage("NORMAL", TACTICA_PREFIX, msg, channel)
     else
-        SendAddonMessage(TACTICA_PREFIX, msg, "RAID", UnitName("player"))
+        SendAddonMessage(TACTICA_PREFIX, msg, channel, UnitName("player"))
     end
 end
 
 function PallyPower_SendMessage(msg)
-    if GetNumRaidMembers() == 0 then
-        SendAddonMessage(PP_PREFIX, msg, "PARTY", UnitName("player"))
+    local channel = (GetNumRaidMembers() == 0) and "PARTY" or "RAID"
+    if ChatThrottleLib and ChatThrottleLib.SendAddonMessage then
+        ChatThrottleLib:SendAddonMessage("NORMAL", PP_PREFIX, msg, channel)
     else
-        SendAddonMessage(PP_PREFIX, msg, "RAID", UnitName("player"))
+        SendAddonMessage(PP_PREFIX, msg, channel, UnitName("player"))
     end
 end
 
@@ -2298,7 +2308,7 @@ function PallyPower_ParseMessage(sender, msg)
             if AllPallys[sender] then
                 AllPallys[sender]["symbols"] = tonumber(count) or 0
             else
-                PallyPower_SendMessage("REQ")
+                PallyPower_RequestSend()
             end
         end
 	    if strfind(msg, "^COOLDOWNS ([0-9]*)") then
@@ -2309,21 +2319,21 @@ function PallyPower_ParseMessage(sender, msg)
                 AllPallys[sender]["DivineIntervention"] = (diAvailable == "1")
                 AllPallys[sender]["LayOnHands"] = (lhAvailable == "1")
             else
-                PallyPower_SendMessage("REQ")
+                PallyPower_RequestSend()
             end
         end
         if string.find(msg, "FREEASSIGN YES") then
             if AllPallys[sender] then
                 AllPallys[sender]["freeassign"] = true
             else
-                PallyPower_SendMessage("REQ")
+                PallyPower_RequestSend()
             end
         end
         if string.find(msg, "FREEASSIGN NO") then
             if AllPallys[sender] then
                 AllPallys[sender]["freeassign"] = false
             else
-                PallyPower_SendMessage("REQ")
+                PallyPower_RequestSend()
             end
         end
         if string.find(msg, "^TANK") then
